@@ -34,6 +34,10 @@ using damped least-squares differential IK and sends them through the configured
 velocity command interfaces. A command older than `reference_timeout` seconds
 (default `0.5`) is treated as a zero twist.
 
+`twist_filter_bandwidth` configures a first-order low-pass filter cutoff in Hz
+(default `10.0`) for all six twist components. Lower values suppress spikes more
+strongly but add response lag; set it to `0.0` to disable filtering.
+
 Twist mode requires `ik_solver: damped_least_squares` and
 `command_interfaces: [velocity]`. Pose tracking remains the default with
 `reference: pose` and uses `~/target_frame` as before.

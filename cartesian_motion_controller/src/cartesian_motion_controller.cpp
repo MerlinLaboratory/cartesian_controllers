@@ -63,6 +63,7 @@ CartesianMotionController::on_init()
 
   auto_declare<std::string>("reference", "pose");
   auto_declare<double>("reference_timeout", 0.5);
+  auto_declare<double>("twist_filter_bandwidth", 10.0);
 
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
@@ -78,6 +79,7 @@ CartesianMotionController::on_configure(const rclcpp_lifecycle::State & previous
 
   m_reference = get_node()->get_parameter("reference").as_string();
   m_reference_timeout = get_node()->get_parameter("reference_timeout").as_double();
+  m_twist_filter_bandwidth = get_node()->get_parameter("twist_filter_bandwidth").as_double();
   if (m_reference != "pose" && m_reference != "twist")
   {
     RCLCPP_ERROR(get_node()->get_logger(), "Parameter 'reference' must be either 'pose' or 'twist'.");
@@ -86,6 +88,12 @@ CartesianMotionController::on_configure(const rclcpp_lifecycle::State & previous
   if (m_reference_timeout <= 0.0)
   {
     RCLCPP_ERROR(get_node()->get_logger(), "Parameter 'reference_timeout' must be greater than zero.");
+    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+  }
+  if (m_twist_filter_bandwidth < 0.0)
+  {
+    RCLCPP_ERROR(get_node()->get_logger(),
+                 "Parameter 'twist_filter_bandwidth' must be non-negative.");
     return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
   }
   if (m_reference == "twist" && !Base::m_ik_solver->supportsDifferentialIK())
@@ -122,6 +130,7 @@ CartesianMotionController::on_activate(const rclcpp_lifecycle::State & previous_
 
   // Start where we are
   m_target_frame = m_current_frame;
+  m_filtered_twist.setZero();
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
 
@@ -141,6 +150,7 @@ controller_interface::return_type CartesianMotionController::update(const rclcpp
   if (m_reference == "twist")
   {
     ctrl::Vector6D reference_twist = ctrl::Vector6D::Zero();
+    bool has_fresh_command = false;
     const auto command = m_target_twist_buffer.readFromRT();
     // Controller-manager update time and the lifecycle node clock can have
     // different clock types in ROS 2. Compare timestamps from this node's
@@ -153,9 +163,25 @@ controller_interface::return_type CartesianMotionController::update(const rclcpp
       reference_twist << command->message.linear.x, command->message.linear.y,
         command->message.linear.z, command->message.angular.x,
         command->message.angular.y, command->message.angular.z;
+      has_fresh_command = true;
     }
 
-    if (!Base::computeJointVelocityCmds(reference_twist, period))
+    if (has_fresh_command)
+    {
+      // First-order low-pass filter. The bandwidth is the -3 dB cutoff in Hz;
+      // setting it to zero disables filtering.
+      constexpr double two_pi = 6.28318530717958647692;
+      const double alpha = m_twist_filter_bandwidth == 0.0 ? 1.0 :
+        1.0 - std::exp(-two_pi * m_twist_filter_bandwidth * period.seconds());
+      m_filtered_twist += alpha * (reference_twist - m_filtered_twist);
+    }
+    else
+    {
+      // A timeout is a safety stop, not a command to be filtered gradually.
+      m_filtered_twist.setZero();
+    }
+
+    if (!Base::computeJointVelocityCmds(m_filtered_twist, period))
     {
       RCLCPP_ERROR(get_node()->get_logger(), "The configured IK solver does not support twist control.");
       return controller_interface::return_type::ERROR;

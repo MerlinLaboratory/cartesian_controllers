@@ -121,6 +121,8 @@ protected:
 
   std::string m_reference;
   double m_reference_timeout = 0.5;
+  double m_twist_filter_bandwidth = 10.0;
+  ctrl::Vector6D m_filtered_twist = ctrl::Vector6D::Zero();
   realtime_tools::RealtimeBuffer<TwistCommand> m_target_twist_buffer;
 
   void targetFrameCallback(const geometry_msgs::msg::PoseStamped::SharedPtr target);
