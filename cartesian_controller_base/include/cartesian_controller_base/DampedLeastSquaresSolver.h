@@ -83,6 +83,11 @@ public:
   trajectory_msgs::msg::JointTrajectoryPoint getJointControlCmds(
     rclcpp::Duration period, const ctrl::Vector6D & net_force) override;
 
+  bool supportsDifferentialIK() const override { return true; }
+
+  trajectory_msgs::msg::JointTrajectoryPoint getJointVelocityCmds(
+    rclcpp::Duration period, const ctrl::Vector6D & reference_twist) override;
+
   /**
      * \brief Initialize the solver
      *

@@ -120,6 +120,10 @@ protected:
      */
   void computeJointControlCmds(const ctrl::Vector6D & error, const rclcpp::Duration & period);
 
+  /** @brief Map a root-frame end-effector twist directly to joint velocities. */
+  bool computeJointVelocityCmds(const ctrl::Vector6D & reference_twist,
+                                const rclcpp::Duration & period);
+
   /**
      * @brief Display the given vector in the given robot base link
      *

@@ -40,6 +40,7 @@
 #include <cartesian_motion_controller/cartesian_motion_controller.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 
 #include "cartesian_controller_base/Utility.h"
@@ -60,6 +61,9 @@ CartesianMotionController::on_init()
     return ret;
   }
 
+  auto_declare<std::string>("reference", "pose");
+  auto_declare<double>("reference_timeout", 0.5);
+
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
 
@@ -72,9 +76,38 @@ CartesianMotionController::on_configure(const rclcpp_lifecycle::State & previous
     return ret;
   }
 
-  m_target_frame_subscr = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
-    get_node()->get_name() + std::string("/target_frame"), 3,
-    std::bind(&CartesianMotionController::targetFrameCallback, this, std::placeholders::_1));
+  m_reference = get_node()->get_parameter("reference").as_string();
+  m_reference_timeout = get_node()->get_parameter("reference_timeout").as_double();
+  if (m_reference != "pose" && m_reference != "twist")
+  {
+    RCLCPP_ERROR(get_node()->get_logger(), "Parameter 'reference' must be either 'pose' or 'twist'.");
+    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+  }
+  if (m_reference_timeout <= 0.0)
+  {
+    RCLCPP_ERROR(get_node()->get_logger(), "Parameter 'reference_timeout' must be greater than zero.");
+    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+  }
+  if (m_reference == "twist" && !Base::m_ik_solver->supportsDifferentialIK())
+  {
+    RCLCPP_ERROR(get_node()->get_logger(),
+                 "Twist reference requires an IK solver with differential IK support. "
+                 "Use ik_solver: damped_least_squares.");
+    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+  }
+
+  if (m_reference == "pose")
+  {
+    m_target_frame_subscr = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
+      get_node()->get_name() + std::string("/target_frame"), 3,
+      std::bind(&CartesianMotionController::targetFrameCallback, this, std::placeholders::_1));
+  }
+  else
+  {
+    m_target_twist_subscr = get_node()->create_subscription<geometry_msgs::msg::Twist>(
+      get_node()->get_name() + std::string("/target_twist"), 3,
+      std::bind(&CartesianMotionController::targetTwistCallback, this, std::placeholders::_1));
+  }
 
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
@@ -104,6 +137,32 @@ controller_interface::return_type CartesianMotionController::update(const rclcpp
 {
   // Synchronize the internal model and the real robot
   Base::m_ik_solver->synchronizeJointPositions(Base::m_joint_state_pos_handles);
+
+  if (m_reference == "twist")
+  {
+    ctrl::Vector6D reference_twist = ctrl::Vector6D::Zero();
+    const auto command = m_target_twist_buffer.readFromRT();
+    // Controller-manager update time and the lifecycle node clock can have
+    // different clock types in ROS 2. Compare timestamps from this node's
+    // clock only; rclcpp::Time subtraction otherwise throws at runtime.
+    const auto command_age_ns = get_node()->get_clock()->now().nanoseconds() -
+      command->received_at.nanoseconds();
+    if (command->valid && command_age_ns >= 0 &&
+        command_age_ns <= static_cast<int64_t>(m_reference_timeout * 1e9))
+    {
+      reference_twist << command->message.linear.x, command->message.linear.y,
+        command->message.linear.z, command->message.angular.x,
+        command->message.angular.y, command->message.angular.z;
+    }
+
+    if (!Base::computeJointVelocityCmds(reference_twist, period))
+    {
+      RCLCPP_ERROR(get_node()->get_logger(), "The configured IK solver does not support twist control.");
+      return controller_interface::return_type::ERROR;
+    }
+    Base::writeJointControlCmds();
+    return controller_interface::return_type::OK;
+  }
 
   // Forward Dynamics turns the search for the according joint motion into a
   // control process. So, we control the internal model until we meet the
@@ -202,6 +261,29 @@ void CartesianMotionController::targetFrameCallback(
     KDL::Rotation::Quaternion(target->pose.orientation.x, target->pose.orientation.y,
                               target->pose.orientation.z, target->pose.orientation.w),
     KDL::Vector(target->pose.position.x, target->pose.position.y, target->pose.position.z));
+}
+
+void CartesianMotionController::targetTwistCallback(
+  const geometry_msgs::msg::Twist::SharedPtr target)
+{
+  if (!this->isActive())
+  {
+    return;
+  }
+
+  const auto & twist = *target;
+  if (std::isnan(twist.linear.x) || std::isnan(twist.linear.y) || std::isnan(twist.linear.z) ||
+      std::isnan(twist.angular.x) || std::isnan(twist.angular.y) || std::isnan(twist.angular.z))
+  {
+    RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 3000,
+                         "NaN detected in target twist. Ignoring input.");
+    return;
+  }
+  TwistCommand command;
+  command.message = *target;
+  command.received_at = get_node()->get_clock()->now();
+  command.valid = true;
+  m_target_twist_buffer.writeFromNonRT(command);
 }
 
 }  // namespace cartesian_motion_controller

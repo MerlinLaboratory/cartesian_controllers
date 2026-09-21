@@ -397,6 +397,19 @@ void CartesianControllerBase::computeJointControlCmds(const ctrl::Vector6D & err
   m_ik_solver->updateKinematics();
 }
 
+bool CartesianControllerBase::computeJointVelocityCmds(const ctrl::Vector6D & reference_twist,
+                                                        const rclcpp::Duration & period)
+{
+  if (!m_ik_solver->supportsDifferentialIK())
+  {
+    return false;
+  }
+
+  m_simulated_joint_motion = m_ik_solver->getJointVelocityCmds(period, reference_twist);
+  m_ik_solver->updateKinematics();
+  return true;
+}
+
 ctrl::Vector6D CartesianControllerBase::displayInBaseLink(const ctrl::Vector6D & vector,
                                                           const std::string & from)
 {

@@ -89,6 +89,25 @@ public:
     rclcpp::Duration period, const ctrl::Vector6D & net_force) = 0;
 
   /**
+   * @brief Whether this solver can map an end-effector twist directly to joint velocities.
+   */
+  virtual bool supportsDifferentialIK() const { return false; }
+
+  /**
+   * @brief Compute a joint-velocity command for a twist expressed in the root frame.
+   *
+   * This is deliberately separate from getJointControlCmds(), whose input is a
+   * force/error vector for the pose-control solvers.
+   */
+  virtual trajectory_msgs::msg::JointTrajectoryPoint getJointVelocityCmds(
+    rclcpp::Duration period, const ctrl::Vector6D & reference_twist)
+  {
+    (void)period;
+    (void)reference_twist;
+    return trajectory_msgs::msg::JointTrajectoryPoint();
+  }
+
+  /**
      * @brief Get the current end effector pose of the simulated robot
      *
      * The last link in the chain from the init() function is taken as end

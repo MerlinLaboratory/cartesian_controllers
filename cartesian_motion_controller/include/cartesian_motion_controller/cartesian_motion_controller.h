@@ -44,8 +44,10 @@
 #include <cartesian_controller_base/cartesian_controller_base.h>
 
 #include <controller_interface/controller_interface.hpp>
+#include <realtime_tools/realtime_buffer.hpp>
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 
 namespace cartesian_motion_controller
 {
@@ -105,12 +107,26 @@ protected:
      * @return The error as a 6-dim vector (linear, angular) w.r.t to the robot base link
      */
   ctrl::Vector6D computeMotionError();
+  void targetTwistCallback(const geometry_msgs::msg::Twist::SharedPtr target);
+
+  struct TwistCommand
+  {
+    geometry_msgs::msg::Twist message;
+    rclcpp::Time received_at;
+    bool valid = false;
+  };
+
   KDL::Frame m_target_frame;
   KDL::Frame m_current_frame;
+
+  std::string m_reference;
+  double m_reference_timeout = 0.5;
+  realtime_tools::RealtimeBuffer<TwistCommand> m_target_twist_buffer;
 
   void targetFrameCallback(const geometry_msgs::msg::PoseStamped::SharedPtr target);
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr m_target_frame_subscr;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr m_target_twist_subscr;
 };
 
 }  // namespace cartesian_motion_controller

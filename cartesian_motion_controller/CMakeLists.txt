@@ -15,11 +15,15 @@ add_definitions(-DEIGEN_MPL2_ONLY)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(cartesian_controller_base REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(realtime_tools REQUIRED)
 
 # Convenience variable for dependencies
 set(THIS_PACKAGE_INCLUDE_DEPENDS
         rclcpp
         cartesian_controller_base
+        geometry_msgs
+        realtime_tools
         Eigen3
 )
 

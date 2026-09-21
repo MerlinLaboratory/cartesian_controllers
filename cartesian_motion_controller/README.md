@@ -25,6 +25,19 @@ The interpolation behavior can be tweaked by the following parameters:
 * The number of internal `iterations` per robot control cycle. The higher this
   value, the more does the controller become an inverse kinematics solver for accurate tracking.
 
+## Twist reference / differential IK
+
+Set `reference: twist` to command an end-effector twist directly. In this mode,
+publish `geometry_msgs/msg/Twist` to `~/target_twist`. Since `Twist` has no frame
+field, every command is assumed to be expressed in `robot_base_link`. The controller maps the twist to joint velocities
+using damped least-squares differential IK and sends them through the configured
+velocity command interfaces. A command older than `reference_timeout` seconds
+(default `0.5`) is treated as a zero twist.
+
+Twist mode requires `ik_solver: damped_least_squares` and
+`command_interfaces: [velocity]`. Pose tracking remains the default with
+`reference: pose` and uses `~/target_frame` as before.
+
 
 ## Getting Started
 We assume that you have the `cartesian_controller_simulation` package installed.
@@ -87,6 +100,12 @@ cartesian_motion_controller:
     command_interfaces:
       - position
         #- velocity
+
+    # Default is pose. For differential IK, use:
+    # reference: twist
+    # reference_timeout: 0.5
+    # ik_solver: damped_least_squares
+    # command_interfaces: [velocity]
 
     solver:
         error_scale: 1.0

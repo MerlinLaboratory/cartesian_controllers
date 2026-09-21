@@ -112,6 +112,32 @@ trajectory_msgs::msg::JointTrajectoryPoint DampedLeastSquaresSolver::getJointCon
   return control_cmd;
 }
 
+trajectory_msgs::msg::JointTrajectoryPoint DampedLeastSquaresSolver::getJointVelocityCmds(
+  rclcpp::Duration period, const ctrl::Vector6D & reference_twist)
+{
+  m_jnt_jacobian_solver->JntToJac(m_current_positions, m_jnt_jacobian);
+
+  ctrl::MatrixND identity;
+  identity.setIdentity(m_number_joints, m_number_joints);
+  m_handle->get_parameter(m_params + ".alpha", m_alpha);
+  m_current_velocities.data =
+    (m_jnt_jacobian.data.transpose() * m_jnt_jacobian.data + m_alpha * m_alpha * identity)
+      .inverse() * m_jnt_jacobian.data.transpose() * reference_twist;
+
+  m_current_positions.data = m_last_positions.data + m_current_velocities.data * period.seconds();
+  applyJointLimits();
+
+  trajectory_msgs::msg::JointTrajectoryPoint control_cmd;
+  for (int i = 0; i < m_number_joints; ++i)
+  {
+    control_cmd.positions.push_back(m_current_positions(i));
+    control_cmd.velocities.push_back(m_current_velocities(i));
+  }
+  control_cmd.time_from_start = period;
+  m_last_positions = m_current_positions;
+  return control_cmd;
+}
+
 bool DampedLeastSquaresSolver::init(std::shared_ptr<rclcpp_lifecycle::LifecycleNode> nh,
                                     const KDL::Chain & chain,
                                     const KDL::JntArray & upper_pos_limits,
